@@ -42,7 +42,7 @@ export default async function handler(req) {
       body: JSON.stringify({
         // Switched to Llama 3 (Free) because it is very stable. 
         // You can change back to 'google/gemini-2.0-flash-exp:free' later.
-        model: "google/gemini-2.0-flash-exp:free", 
+        model: "mistralai/devstral-2512:free", 
         messages: messages,
         stream: true, 
       }),
