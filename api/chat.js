@@ -1,32 +1,36 @@
 export const config = {
-  runtime: 'edge', // Enables streaming
+  runtime: 'edge',
 };
 
 export default async function handler(req) {
+  // 1. Check Method
   if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 });
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
   try {
+    // 2. Parse Data
     const { message, history } = await req.json();
     const apiKey = process.env.OPENROUTER_API_KEY;
 
-    // 1. Prepare messages
-    // We filter out the old 'system' messages from local storage to avoid duplication
-    // and inject a fresh, authoritative System Prompt.
+    if (!apiKey) {
+      return new Response(JSON.stringify({ error: 'API Key is missing in Vercel Settings' }), { status: 500 });
+    }
+
+    // 3. Prepare Messages
     const messages = [
       {
         role: "system",
-        content: "You are Elegets AI, a helpful, professional, and intelligent assistant created by Elegets Electronics. You specialize in IoT, coding, and electronics. Answer concisely and accurately."
+        content: "You are Elegets AI. Be helpful, concise, and professional."
       },
-      ...history.filter(msg => msg.role !== 'system').map(msg => ({
-        role: msg.role === 'bot' ? 'assistant' : msg.role, // Map 'bot' to 'assistant' for API
+      ...(history || []).filter(msg => msg.role !== 'system').map(msg => ({
+        role: msg.role === 'bot' ? 'assistant' : msg.role,
         content: msg.content
       })),
-      { role: "user", content: message } // The newest message
+      { role: "user", content: message }
     ];
 
-    // 2. Call OpenRouter
+    // 4. Call OpenRouter (Using a highly stable model for testing)
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -36,19 +40,21 @@ export default async function handler(req) {
         "X-Title": "Elegets AI",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.0-flash-exp:free", // Best free model
+        // Switched to Llama 3 (Free) because it is very stable. 
+        // You can change back to 'google/gemini-2.0-flash-exp:free' later.
+        model: "meta-llama/llama-3-8b-instruct:free", 
         messages: messages,
         stream: true, 
       }),
     });
 
+    // 5. Catch API Errors
     if (!response.ok) {
-      const err = await response.text();
-      return new Response(`API Error: ${err}`, { status: 500 });
+      const errorText = await response.text();
+      return new Response(JSON.stringify({ error: `OpenRouter API Error: ${errorText}` }), { status: response.status });
     }
 
-    // 3. Process the Stream (Server-Side)
-    // We read OpenRouter's "data: {...}" format and convert it to raw text for your frontend
+    // 6. Stream the Response
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
     
@@ -64,7 +70,7 @@ export default async function handler(req) {
           const chunk = decoder.decode(value, { stream: true });
           buffer += chunk;
           const lines = buffer.split('\n');
-          buffer = lines.pop(); // Keep incomplete lines in buffer
+          buffer = lines.pop(); 
 
           for (const line of lines) {
             if (line.trim() === 'data: [DONE]') continue;
@@ -72,12 +78,8 @@ export default async function handler(req) {
               try {
                 const json = JSON.parse(line.substring(6));
                 const content = json.choices[0]?.delta?.content || "";
-                if (content) {
-                  controller.enqueue(encoder.encode(content));
-                }
-              } catch (e) {
-                // Ignore parse errors from partial chunks
-              }
+                if (content) controller.enqueue(encoder.encode(content));
+              } catch (e) {}
             }
           }
         }
@@ -90,6 +92,6 @@ export default async function handler(req) {
     });
 
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: `Backend Crash: ${error.message}` }), { status: 500 });
   }
 }
