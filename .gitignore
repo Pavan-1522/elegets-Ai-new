@@ -1,0 +1,6 @@
+# Ignore the secret keys
+.env
+
+# Ignore node modules (heavy folder)
+node_modules/
+.DS_Store
